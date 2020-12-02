@@ -1,0 +1,209 @@
+
+class Input {
+    constructor(equations) {
+        this.equations = equations;
+    }
+
+}
+function findPivot(table) {
+    // find min value in objective function (ignore last element because last element is Right Hand Side.)
+    var objective = table[0];
+    var minValue = Math.min(...objective.slice(0, objective.length - 1));
+    // if objective function doesn't have any positive coefficient
+    if (minValue >= 0) {
+        return null;
+    }
+    var pivotCol = objective.indexOf(minValue);
+    var pivotRow = 0;
+    var tempMin = Infinity;
+    for (i = 1; i < table.length; i++) {
+        if (table[i][pivotCol] > 0) {
+            // RHS divided by values in pivot column
+            temp = table[i][table[i].length - 1] / table[i][pivotCol];
+            if (temp < tempMin) {
+                tempMin = temp;
+                pivotRow = i;
+            }
+        }
+    }
+    if (tempMin == Infinity)
+        throw "Unbounded Objective value"
+    return [pivotRow, pivotCol];
+
+
+}
+function getBasicVariables(table, totalVariables) {
+    var basicVars = [];
+    for (var i = 0; i < totalVariables.length; i++) {
+        var numberOfOnes = 0;
+        for (var j = 0; j < table.length; j++) {
+            if (table[j][i] == 1)
+                numberOfOnes += 1;
+            else if (table[j][i] != 0) {
+                isBasic = false;
+                break;
+            }
+        }
+        if (numberOfOnes == 1) {
+            basicVars.push(totalVariables[i])
+        }
+    }
+    return basicVars;
+}
+function printTable(table, totalVariables) {
+    process.stdout.write("  ");
+    for (var i = 0; i < totalVariables.length; i++)
+        process.stdout.write(totalVariables[i] + '  ,  ')
+    process.stdout.write('RHS')
+    console.log('')
+    var basicVariables = getBasicVariables(table, totalVariables);
+    basicVariables.splice(0, 0, 'Z');
+    for (var i = 0; i < table.length; i++) {
+        process.stdout.write(basicVariables[i] + "|");
+        for (var j = 0; j < table[i].length; j++) {
+            process.stdout.write(table[i][j].toFixed(2).toString() + ' , ');
+        }
+        console.log('')
+    }
+}
+function updateTable(table, pivot) {
+    var pivot_row = pivot[0];
+    var pivot_col = pivot[1];
+    // update pivot row
+    table[pivot_row] = table[pivot_row].map(a => a / table[pivot_row][pivot_col]);
+    // update other rows
+    for (var i = 0; i < table.length; i++) {
+        if (i != pivot_row) {
+            var c = -1 * table[i][pivot_col];
+            table[i] = table[pivot_row].map((a, index) => (a * c + table[i][index]))
+        }
+    }
+}
+function addSlagVariables(inp) {
+    eqCounts = inp.equations.length;
+    var objective = inp.equations.shift();
+    // sort equations in order : <= , = , >=
+    inp.equations.sort(function (a, b) { return a[a.length - 1] - b[b.length - 1] });
+    inp.equations.splice(0, 0, objective)
+
+    // null is for objective function.
+    var equationTypes = [null]
+    for (var i = 1; i < eqCounts; i++) {
+        equationTypes.push(inp.equations[i].pop())
+    }
+    var RvariablesIndexes = []
+    var totalVariables = [];
+    var S_index = 1;
+    var R_index = 1;
+
+    for (var i = 1; i < inp.equations[0].length; i++) {
+        totalVariables.push('x' + i.toString())
+    }
+
+    for (var i = 1; i < eqCounts; i++) {
+        switch (equationTypes[i]) {
+            // if equation is "<="
+            case '<=':
+                for (var j = 0; j < inp.equations.length; j++) {
+                    inp.equations[j].splice(inp.equations[j].length - 1, 0, i == j ? 1 : 0);
+                }
+                totalVariables.push('S' + S_index.toString());
+                S_index += 1;
+                break;
+            case '=':
+                for (var j = 0; j < inp.equations.length; j++) {
+                    inp.equations[j].splice(inp.equations[j].length - 1, 0, i == j ? 1 : 0);
+                }
+                RvariablesIndexes.push(i);
+                totalVariables.push('R' + R_index.toString());
+                R_index += 1;
+                break;
+            case '>=':
+                for (var j = 0; j < inp.equations.length; j++) {
+                    inp.equations[j].splice(inp.equations[j].length - 1, 0, i == j ? -1 : 0);
+                    // j==0 means objective row. we add M to objective rows when this equation (ith equation) is of type <= and add 
+                    // 0 to other equations.
+                    inp.equations[j].splice(inp.equations[j].length - 1, 0, i == j ? 1 : (j == 0 ? M : 0));
+
+                }
+                RvariablesIndexes.push(i);
+                totalVariables.push('S' + S_index.toString());
+                totalVariables.push('R' + R_index.toString());
+                R_index += 1;
+                S_index += 1;
+                break;
+            default:
+                throw "invalid input";
+        }
+    }
+    for (var i = 0; i < RvariablesIndexes.length; i++) {
+        inp.equations[0] = inp.equations[0].map((a, index) => a - M * inp.equations[RvariablesIndexes[i]][index])
+    }
+    return totalVariables;
+
+}
+function simplex(inp) {
+    try {
+        eqCounts = inp.equations.length;
+        for (var i = 0; i < eqCounts; i++) {
+            if (i == 0)
+                inp.equations[0] = inp.equations[0].map(a => -a);
+            else {
+                var tmp = inp.equations[i][inp.equations[i].length - 1];
+                inp.equations[i].pop();
+                inp.equations[i].splice(inp.equations[i].length - 1, 0, tmp);
+            }
+        }
+        var totalVariables = addSlagVariables(inp);
+        console.log("total_v:");
+        console.log(totalVariables);
+        table = [];
+        for (i = 0; i < eqCounts; i++) {
+            table.push(inp.equations[i].slice(0));
+        }
+        printTable(table, totalVariables);
+
+        // pivot : [rowIndex,columnIndex]
+        var iterCount = 1;
+        while (true) {
+            console.log("Iteration : ", iterCount);
+            console.log("table :");
+            printTable(table, totalVariables)
+            var pivot = findPivot(table, inp.objective)
+            if (pivot == null) break;
+            console.log("pivot position : ", pivot)
+            console.log("pivot number : ", table[pivot[0]][pivot[1]])
+            updateTable(table, pivot)
+            console.log('******************************************************')
+            iterCount += 1;
+            if (iterCount > 100) throw "loop";
+            // console.log("new table :")
+            // printTable(table)
+        }
+        console.log('******************************************************')
+        console.log("problem solved successfully.")
+        console.log("total iteration : ", iterCount);
+        console.log('variables : ')
+        var basicVars = getBasicVariables(table, totalVariables);
+        for (var i = 0; i < totalVariables.length; i++) {
+            var value = 0;
+            if (basicVars.includes(totalVariables[i])) {
+                var index = basicVars.indexOf(totalVariables[i]);
+                value = table[index][table[index].length - 1]
+            }
+            console.log(totalVariables[i] + " = ", value.toPrecision(3))
+        }
+        console.log("maximum value for objective function = ", table[0][table[0].length - 1].toPrecision(3))
+    }
+    catch (ex) {
+        console.log(ex);
+    }
+}
+
+
+
+const M = 1e5;
+inp = new Input([[40, 50, 0], [1, 2, '<=', 40], [4, 3, '<=', 120]]);
+simplex(inp)
+
+
